@@ -21,7 +21,7 @@ import (
 )
 
 //////////////////// 处理区块链 ////////////////////
-const difficulty = 1 // 定义难度，也就是哈希包含多少个0的前缀
+const difficulty = 3 // 定义难度，也就是哈希包含多少个0的前缀
 type Block struct {
 	Index int // 表示区块所在区块链的位置
 	Timestamp string // 生成区块的时间戳
@@ -61,8 +61,8 @@ func generateBlock(oldBlock Block, Data int) (Block, error) {
 		newBlock.Nonce = hex
 		newHash := calculateHash(newBlock) // 计算哈希
 		if !isHashValid(newHash, newBlock.Difficulty) {
-			fmt.Println(newHash, " 继续努力！🆙")
-			time.Sleep(time.Second) // 每隔1s执行一次
+			//fmt.Println(newHash, " 继续努力！🆙")
+			time.Sleep(time.Millisecond) // 每隔1s执行一次
 			continue
 		} else {
 			fmt.Println(newHash, " 已经成功！")
@@ -140,43 +140,58 @@ func main () {
 func handleConn(conn net.Conn) {
 	defer conn.Close() // 完成后关闭
 	spew.Dump(conn)
-	io.WriteString(conn, "输入数字：")
+	_, _ = io.WriteString(conn, "输入数字：")
 	scanner := bufio.NewScanner(conn)
 
 	go func() {
 		for scanner.Scan() { // 轮询扫描所有tcp连接
 			data, err := strconv.Atoi(scanner.Text())
+			var newBlock Block
 
 			if err != nil {
-				log.Printf("%v 非数字", scanner.Text(), err)
+				log.Printf("%v 非数字 %s\n", scanner.Text(), err)
+				goto END
+			} else {
+				log.Printf("Input: %v\n", data)
 			}
-			newBlock, err := generateBlock(BlockChain[len(BlockChain) - 1], data)
+			newBlock, err = generateBlock(BlockChain[len(BlockChain) - 1], data)
 
 			if err != nil {
 				log.Println(err)
-				continue
+				goto END
 			}
 
 			if isBlockValid(newBlock, BlockChain[len(BlockChain) - 1]) {
 				newBlockChain := append(BlockChain, newBlock)
 				replaceChain(newBlockChain)
+				bcServer <- BlockChain // 将生成的区块数据交给通道，单向传递
+			} else {
+				io.WriteString(conn, "Invalid new block\n")
+				goto END
 			}
 
-			bcServer <- BlockChain // 将生成的区块数据交给通道，单向传递
-			io.WriteString(conn, "\n输入数字：")
+			END: io.WriteString(conn, "输入数字：\n")
 		}
 	}()
 
 	go func() {
+		var currentBlockChain string
+
 		for { // 每隔10s同步一次
 			time.Sleep(10 * time.Second)
 			output, err := json.MarshalIndent(BlockChain, "", " ")
 
 			if err != nil {
 				log.Fatal(err)
+				continue
 			}
-
-			io.WriteString(conn, "\n↓↓↓↓↓↓↓↓↓↓↓↓↓ 同步区块链：↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n"+ string(output) + "\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n")
+			strOutput := string(output)
+			if currentBlockChain == strOutput {
+				continue
+			} else {
+				io.WriteString(conn, "\n↓↓↓↓↓↓↓↓↓↓↓↓↓ 同步区块链：↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n"+ strOutput + "\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n")
+				currentBlockChain = strOutput
+			}
 		}
 	}()
 
